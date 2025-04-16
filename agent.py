@@ -9,6 +9,9 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.mcp import MCPServerHTTP
 from dotenv import load_dotenv
 
+os.environ["SERVER_HOST"] = "127.0.0.1"
+os.environ["SERVER_PORT"] = str(8504)
+
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
@@ -30,7 +33,9 @@ model = OpenAIModel(provider=provider, model_name=LLM_MODEL)
 
 # Define the MCP Servers
 logger.info("Initializing MCP Server HTTP")
-mcp_server_url = f"{os.environ['SERVER_HOST']}:{int(os.environ['SERVER_PORT'])}/mcp"
+mcp_server_url = (
+    f"http://{os.environ['SERVER_HOST']}:{int(os.environ['SERVER_PORT'])}/mcp"
+)
 # Instantiate the MCPServerHTTP object
 mcp_server = MCPServerHTTP(url=mcp_server_url)
 logger.info("MCP Server HTTP initialized.")

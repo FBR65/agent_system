@@ -20,11 +20,10 @@ from pydantic import BaseModel, Field, EmailStr
 from app.mcp_search.duck_search import (
     DuckDuckGoSearcher,
     DuckDuckGoSearchResults,
-    DuckDuckGoSearchResult,
 )
 from app.mcp_python.python_tools import PythonREPL, data_visualization
 from app.mcp_email.email_sender import EmailSender
-from app.mcp_anonymizer.anonymiz import Anonymizer  # <-- NEUER Import
+from app.mcp_anonymizer.anonymiz import Anonymizer
 
 # --- Logging Configuration ---
 logging.basicConfig(
@@ -274,7 +273,7 @@ def format_duckduckgo_results(search_results: DuckDuckGoSearchResults) -> str:
 @app.get(
     "/search",
     operation_id="search_duckduckgo_tool",
-    tags=["Search Tools"],
+    tags=["Search Tools, Weather Tools"],
     response_model=SearchOutput,
     responses={500: {"model": ErrorResponse}},
 )
@@ -453,6 +452,6 @@ if __name__ == "__main__":
 
     logger.info("Starting FastAPI server with Uvicorn.")
     # Modulpfad für Uvicorn verwenden: 'app:app', wenn die Datei app.py heißt
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app:app", host="0.0.0.0", port=8504, reload=True)
     logger.info("FastAPI server stopped.")
 # --- End Main Execution ---

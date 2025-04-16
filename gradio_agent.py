@@ -40,7 +40,7 @@ class GradioAgent:
         llm_endpoint = os.getenv("BASE_URL", "http://localhost:11434/v1")
         llm_model_name = os.getenv("MODEL_NAME", "qwen2.5:latest")
         mcp_server_host = os.getenv("SERVER_HOST", "127.0.0.1")  # Default added
-        mcp_server_port = int(os.getenv("SERVER_PORT", "8080"))  # Default added
+        mcp_server_port = int(os.getenv("SERVER_PORT", "8504"))  # Default added
 
         logger.info(f"Using LLM Endpoint: {llm_endpoint}")
         logger.info(f"Using LLM Model: {llm_model_name}")

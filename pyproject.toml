@@ -21,4 +21,5 @@ dependencies = [
     "fastapi-mcp>=0.2.0",
     "requests>=2.32.3",
     "tika>=3.1.0",
+    "gradio>=5.25.2",
 ]
