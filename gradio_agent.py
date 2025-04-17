@@ -107,12 +107,33 @@ class GradioAgent:
             # The MCP server needs to be running during the agent execution
             async with self.agent.run_mcp_servers():
                 logger.info("MCP Server context entered.")
-                result = await self.agent.run(prompt)
+                # agent.run returns an AgentRunResult object
+                agent_run_result = await self.agent.run(prompt)
                 logger.info("MCP Server context exited.")
 
-            logger.info(f"Agent finished. Result length: {len(result)}")
-            # logger.debug(f"Agent result: {result}") # Use debug level for potentially large output
-            return result
+            # --- Debugging: Inspect the result object ---
+            # You can remove these lines now
+            # print("\n--- Inspecting AgentRunResult ---")
+            # print(f"Type: {type(agent_run_result)}")
+            # print(f"Object: {agent_run_result}")
+            # print(f"Attributes: {dir(agent_run_result)}")
+            # try:
+            #     print(f"Vars: {vars(agent_run_result)}")
+            # except TypeError:
+            #     print("Vars: Not applicable for this object type.")
+            # print("--- End Inspection ---")
+            # --- End Debugging ---
+
+            # Access the 'data' attribute to get the final string output
+            final_output = agent_run_result.data
+            logger.info("Successfully extracted 'data' from AgentRunResult.")
+
+            # Now you can safely get the length of the output string
+            logger.info(f"Agent finished. Result length: {len(final_output)}")
+            # logger.debug(f"Agent result: {final_output}") # Use debug level for potentially large output
+
+            # Return the extracted string
+            return final_output
         except Exception as e:
             logger.error(f"Error during agent execution: {e}", exc_info=True)
             # Depending on Gradio needs, you might return an error message
@@ -120,11 +141,12 @@ class GradioAgent:
             return f"An error occurred: {e}"
 
 
-# --- Example Usage (Optional - for testing the class directly) ---
 async def _test_agent_class():
     print("Testing GradioAgent class...")
     try:
         gradio_agent = GradioAgent()
+        # Ensure the LLM endpoint read is correct (optional debug print)
+        # print(f"DEBUG: Provider Base URL: {gradio_agent.agent.model.provider.base_url}")
         test_prompt = "Was bedeutet KI? Nenne 5 Quellen."
         # test_prompt = "What is the capital of France?" # English example
         result = await gradio_agent.run_inference(test_prompt)
@@ -134,7 +156,6 @@ async def _test_agent_class():
     except Exception as e:
         print(f"\n--- Error during testing ---")
         print(f"An error occurred: {e}")
-        # You might want more detailed logging or error handling here
         import traceback
 
         traceback.print_exc()
@@ -143,22 +164,16 @@ async def _test_agent_class():
 
 if __name__ == "__main__":
     print("Starting agent class test...")
-    # Ensure an event loop is running if testing directly
-    # asyncio.run(_test_agent_class()) # Preferred for Python 3.7+
-
-    # Alternative for environments where asyncio.run might cause issues
+    # Use the standard asyncio.run for direct script execution
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # If in an environment like Jupyter where a loop is already running
-            import nest_asyncio
-
-            nest_asyncio.apply()
-            loop.create_task(_test_agent_class())
-        else:
-            loop.run_until_complete(_test_agent_class())
-    except RuntimeError:
-        # Fallback if get_event_loop fails in certain contexts
         asyncio.run(_test_agent_class())
+    except Exception as e:
+        # Catch potential top-level errors during asyncio.run itself
+        print(f"\n--- Top-level Error during testing ---")
+        print(f"An error occurred: {e}")
+        import traceback
+
+        traceback.print_exc()
+        print("--- End Top-level Error ---")
 
     print("Agent class test finished.")

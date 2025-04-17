@@ -33,6 +33,12 @@ logger = logging.getLogger(__name__)
 logger.info("--- Starting execution of combined application ---")
 # --- End Logging Configuration ---
 
+SENDER_EMAIL = os.getenv("EMAIL_SENDER")
+if not SENDER_EMAIL:
+    logger.warning(
+        "EMAIL_SENDER environment variable not set. Emails might fail to send."
+    )
+
 # --- Tool Instantiation ---
 repl = PythonREPL()
 ddg_search = DuckDuckGoSearcher()
@@ -324,9 +330,30 @@ async def send_email_route(payload: EmailInput = Body(...)):
     logger.info(
         f"Tool 'send_email_tool' called via FastAPI route to send email to {payload.to_address}"
     )
+
+    # Check if sender email is configured
+    if not SENDER_EMAIL:
+        logger.error(
+            "Cannot send email: EMAIL_SENDER environment variable is not configured."
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Email sending is not configured on the server (missing sender address)."
+            },
+        )
+
     try:
+        # Correctly call send_email with 'recipient_emails' as a list
+        # and provide the 'sender_email'
         success = email_sender.send_email(
-            to_address=payload.to_address, subject=payload.subject, body=payload.body
+            sender_email=SENDER_EMAIL,  # Pass the configured sender email
+            recipient_emails=[payload.to_address],  # Pass the recipient as a list
+            subject=payload.subject,
+            body=payload.body,
+            # You can add other optional args like sender_name, content_type here if needed
+            # sender_name="My Agent",
+            # content_type="plain", # Default is 'plain' in EmailSender
         )
         if success:
             logger.info(f"Email successfully sent to {payload.to_address}")
@@ -437,7 +464,7 @@ mcp = FastApiMCP(
     app,
     name="Combined Tools MCP",
     description="An API providing Python REPL, Data Visualization, DuckDuckGo Search, Email, and Text Anonymization capabilities.",  # <-- Beschreibung aktualisiert
-    base_url=f"{os.environ['SERVER_HOST']}:{int(os.environ['SERVER_PORT'])}",
+    base_url=f"http://{os.environ['SERVER_HOST']}:{int(os.environ['SERVER_PORT'])}",
 )
 
 # MCP Server Endpunkte einbinden (z.B. /mcp.json)

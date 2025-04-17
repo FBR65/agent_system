@@ -1,0 +1,8 @@
+1. Anonymisiere den Text 
+2. Versende den anonymisierten Text an fbr65@duck.com
+
+Text:
+Erika Mustermann arbeitet bei der Beispiel GmbH in München. Ihr Projekt heißt intern 'Projekt Sonne'.
+Max Mustermann wohnt in Berlin. Seine E-Mail ist max.mustermann@email.com.
+Kontaktieren Sie Klaus Müller (Tel: 0171-123456) oder Max Mustermann wegen der Lieferung nach Hamburg.
+Die Kundennummer lautet KDB-789-C. Das Meeting findet in Berlin statt.

@@ -27,6 +27,7 @@ class EmailSender:
         if not self.api_key:
             logging.error("EMAIL_KEY nicht in der .env Datei gefunden.")
             raise ValueError("EMAIL_KEY nicht in der .env Datei gefunden.")
+
         if not os.getenv("EMAIL_URL"):
             logging.warning(
                 "EMAIL_URL nicht in der .env Datei gefunden. Standardwert '%s' wird verwendet.",
