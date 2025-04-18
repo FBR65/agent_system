@@ -1,20 +1,36 @@
-# c:\Users\frank\Documents\py_projects\dev\agent_system\app\app.py
+"""
+Main application file for the combined FastAPI application.
+This file integrates various tools including Python REPL, Data Visualization, DuckDuckGo Search,
+Email, Text Anonymization, and Database Operations. # <-- Beschreibung aktualisiert
+"""
+
 import io
 import base64
 import logging
 import os
 import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict, Any  # <-- Dict, Any hinzugefügt
 
 # FastAPI imports
-from fastapi import FastAPI, Body, HTTPException, Query
+from fastapi import (
+    FastAPI,
+    Body,
+    HTTPException,
+    Query,
+    Path,
+    status,
+)  # <-- Path, status hinzugefügt
 from fastapi.responses import JSONResponse
 
 # MCP imports
 from fastapi_mcp import FastApiMCP
 
 # Pydantic models
-from pydantic import BaseModel, Field, EmailStr
+# Import Pydantic BaseModel with an alias first
+# because of coflict with SQLAlchemy BaseModel
+from pydantic import BaseModel as PydanticBaseModel
+from pydantic import Field, EmailStr
+
 
 # Import tools and models from other modules
 from app.mcp_search.duck_search import (
@@ -24,6 +40,34 @@ from app.mcp_search.duck_search import (
 from app.mcp_python.python_tools import PythonREPL, data_visualization
 from app.mcp_email.email_sender import EmailSender
 from app.mcp_anonymizer.anonymiz import Anonymizer
+
+# --- Database Imports ---
+from app.mcp_database.database import (
+    DatabaseHandler,
+    Base,
+)  # Import Base if needed for query filters
+
+try:
+    # Versuche, das User-Modell zu importieren
+    from app.mcp_database.database import User as UserModel
+except ImportError:
+    # Fallback
+    logging.warning("Could not import User model from database.py, defining fallback.")
+    from sqlalchemy import Column, Integer, String, DateTime
+
+    # Import the SQLAlchemy BaseModel with a DISTINCT alias
+    from app.mcp_database.database import BaseModel as DatabaseBaseModel
+
+    # Define the fallback UserModel using the DISTINCT alias
+    class UserModel(DatabaseBaseModel):  # <--- Use the alias here
+        __tablename__ = "users"
+        name = Column(String)
+        email = Column(String, unique=True)
+
+        def __repr__(self):
+            return f"<User(id={self.id}, name='{self.name}', email='{self.email}')>"
+# --- End Database Imports ---
+
 
 # --- Logging Configuration ---
 logging.basicConfig(
@@ -47,10 +91,6 @@ email_sender = EmailSender()
 # Anonymizer Configuration & Instantiation
 anonymizer_instance = None
 try:
-    # Konfiguration über Umgebungsvariablen (optional, Anonymizer hat Defaults/Logik)
-    # Beispiel: USE_LLM_ANONYMIZER = os.getenv("USE_LLM_ANONYMIZER", "false").lower() == "true"
-    # Der Anonymizer selbst liest detailliertere LLM-Vars, falls use_llm=True ist.
-    # Hier entscheiden wir nur, OB LLM genutzt werden soll (kann auch hardcoded sein).
     USE_LLM_FOR_ANONYMIZER = (
         False  # Setze auf True, wenn LLM genutzt werden soll und konfiguriert ist
     )
@@ -68,28 +108,32 @@ try:
         llm_api_key=LLM_API_KEY,
         llm_endpoint_url=LLM_ENDPOINT,
         llm_model_name=LLM_MODEL,
-        # labels_to_anonymize kann hier auch überschrieben werden, wenn gewünscht
     )
     logger.info("Anonymizer initialized successfully.")
 except ValueError as e:
-    # Fängt Konfigurationsfehler vom Anonymizer ab (z.B. fehlender Key bei use_llm=True)
     logger.error(
         f"Configuration error initializing Anonymizer: {e}. Anonymization endpoint might not work as expected."
     )
 except OSError as e:
-    # Fängt Fehler ab, wenn das spaCy-Modell nicht gefunden wird
     logger.error(
         f"Failed to initialize Anonymizer due to spaCy model issue: {e}. Please ensure 'de_core_news_lg' is downloaded."
     )
     logger.error("Run: python -m spacy download de_core_news_lg")
 except Exception as e:
-    # Fängt andere unerwartete Fehler bei der Initialisierung ab
     logger.error(
         f"Unexpected error initializing Anonymizer: {e}. Anonymization endpoint will be unavailable."
     )
-    anonymizer_instance = (
-        None  # Stelle sicher, dass es None ist, wenn die Initialisierung fehlschlägt
-    )
+    anonymizer_instance = None
+
+# --- Database Handler Instantiation ---
+try:
+    # Verwende einen sinnvollen Datenbanknamen, z.B. den aus dem Beispiel
+    db_handler = DatabaseHandler("main_database.db")
+    logger.info(f"DatabaseHandler initialized successfully for main_database.db")
+except Exception as e:
+    logger.error(f"Failed to initialize DatabaseHandler: {e}")
+    db_handler = None  # Setze auf None, damit Routen fehlschlagen können
+# --- End Database Handler Instantiation ---
 
 # --- End Tool Instantiation ---
 
@@ -102,22 +146,22 @@ logger.info(f"Generated code will be saved to: {GENERATED_CODE_DIR}")
 # --- FastAPI App Initialization ---
 app = FastAPI(
     title="Combined Tools API",
-    description="Provides Python REPL, Data Visualization, DuckDuckGo Search, Email, and Text Anonymization capabilities via FastAPI and MCP.",  # <-- Beschreibung aktualisiert
+    description="Provides Python REPL, Data Visualization, DuckDuckGo Search, Email, Text Anonymization, and Database capabilities via FastAPI and MCP.",  # <-- Beschreibung aktualisiert
     version="1.0.0",
 )
 # --- End FastAPI App Initialization ---
 
 
 # --- Pydantic Models ---
-class CodeInput(BaseModel):
+class CodeInput(PydanticBaseModel):
     code: str = Field(..., description="Python code to execute.")
 
 
-class ReplOutput(BaseModel):
+class ReplOutput(PydanticBaseModel):
     output: str = Field(..., description="The standard output of the executed code.")
 
 
-class VisualizationOutput(BaseModel):
+class VisualizationOutput(PydanticBaseModel):
     image_data_url: Optional[str] = Field(
         None,
         description="Base64 encoded PNG image data URL (data:image/png;base64,...). Present on success.",
@@ -131,47 +175,67 @@ class VisualizationOutput(BaseModel):
     )
 
 
-class SearchOutput(BaseModel):
+class SearchOutput(PydanticBaseModel):
     results_markdown: str = Field(
         ..., description="Search results formatted as markdown."
     )
 
 
-class EmailInput(BaseModel):
+class EmailInput(PydanticBaseModel):
     to_address: EmailStr = Field(..., description="The recipient's email address.")
     subject: str = Field(..., description="The subject line of the email.")
     body: str = Field(..., description="The main content/body of the email.")
 
 
-class EmailOutput(BaseModel):
+class EmailOutput(PydanticBaseModel):
     message: str = Field(
         ..., description="A message indicating the outcome (success or failure)."
     )
 
 
-# --- NEUE Pydantic-Modelle für Anonymisierung ---
-class AnonymizeInput(BaseModel):
+class AnonymizeInput(PydanticBaseModel):
     text: str = Field(..., description="The text to be anonymized.")
-    # Optional: Flag hinzufügen, um Mapping pro Anfrage zurückzusetzen? Standard: Kein Reset.
-    # reset_mapping: bool = Field(False, description="Reset the anonymization mapping before processing this text.")
 
 
-class AnonymizeOutput(BaseModel):
+class AnonymizeOutput(PydanticBaseModel):
     anonymized_text: str = Field(
         ..., description="The anonymized version of the input text."
     )
-    # Optional: Mapping zurückgeben? Könnte groß werden.
-    # mapping: Optional[dict] = Field(None, description="The mapping used for anonymization in this request (if applicable).")
     message: Optional[str] = Field(
         None,
         description="Additional status messages, e.g., if anonymizer wasn't initialized.",
     )
 
 
-# --- Ende NEUE Pydantic-Modelle ---
+# --- Database Pydantic Models ---
+class UserBase(PydanticBaseModel):
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
 
 
-class ErrorResponse(BaseModel):
+class UserCreate(UserBase):
+    name: str  # Name ist beim Erstellen erforderlich
+    email: EmailStr  # Email ist beim Erstellen erforderlich
+
+
+class UserUpdate(UserBase):
+    # Alle Felder sind optional beim Update
+    pass
+
+
+class UserResponse(UserBase):
+    id: int
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+    class Config:
+        orm_mode = True  # Erlaubt das direkte Erstellen aus SQLAlchemy-Objekten
+
+
+# --- End Database Pydantic Models ---
+
+
+class ErrorResponse(PydanticBaseModel):
     error: str = Field(..., description="Details about the error that occurred.")
     execution_output: Optional[str] = Field(
         None, description="Standard output captured before the error, if available."
@@ -181,9 +245,22 @@ class ErrorResponse(BaseModel):
 # --- End Pydantic Models ---
 
 
+# --- Helper Function for Database Availability ---
+def check_db_handler():
+    if db_handler is None:
+        logger.error("Database handler is not available.")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database service is not initialized or available.",
+        )
+
+
+# --- End Helper Function ---
+
+
 # --- API Endpoints ---
 
-# ... (bestehende Endpunkte /python-repl, /data-visualization, /search, /send-email bleiben unverändert) ...
+# ... (vorhandene Endpunkte für REPL, Visualization, Search, Email, Anonymize bleiben hier) ...
 
 
 @app.post(
@@ -279,7 +356,7 @@ def format_duckduckgo_results(search_results: DuckDuckGoSearchResults) -> str:
 @app.get(
     "/search",
     operation_id="search_duckduckgo_tool",
-    tags=["Search Tools, Weather Tools"],
+    tags=["Search Tools", "Weather Tools"],  # Behalte beide Tags bei, falls relevant
     response_model=SearchOutput,
     responses={500: {"model": ErrorResponse}},
 )
@@ -331,7 +408,6 @@ async def send_email_route(payload: EmailInput = Body(...)):
         f"Tool 'send_email_tool' called via FastAPI route to send email to {payload.to_address}"
     )
 
-    # Check if sender email is configured
     if not SENDER_EMAIL:
         logger.error(
             "Cannot send email: EMAIL_SENDER environment variable is not configured."
@@ -344,16 +420,11 @@ async def send_email_route(payload: EmailInput = Body(...)):
         )
 
     try:
-        # Correctly call send_email with 'recipient_emails' as a list
-        # and provide the 'sender_email'
         success = email_sender.send_email(
-            sender_email=SENDER_EMAIL,  # Pass the configured sender email
-            recipient_emails=[payload.to_address],  # Pass the recipient as a list
+            sender_email=SENDER_EMAIL,
+            recipient_emails=[payload.to_address],
             subject=payload.subject,
             body=payload.body,
-            # You can add other optional args like sender_name, content_type here if needed
-            # sender_name="My Agent",
-            # content_type="plain", # Default is 'plain' in EmailSender
         )
         if success:
             logger.info(f"Email successfully sent to {payload.to_address}")
@@ -381,20 +452,15 @@ async def send_email_route(payload: EmailInput = Body(...)):
         return JSONResponse(status_code=500, content={"error": error_msg})
 
 
-# --- NEUE Anonymisierungs-Route ---
 @app.post(
     "/anonymize",
-    operation_id="anonymize_text_tool",  # <-- MCP operation_id
-    tags=["Anonymization Tools"],  # <-- Tag für Gruppierung
+    operation_id="anonymize_text_tool",
+    tags=["Anonymization Tools"],
     response_model=AnonymizeOutput,
     responses={
-        400: {
-            "model": ErrorResponse
-        },  # Für ungültige Eingaben (obwohl Pydantic viel abfängt)
-        500: {"model": ErrorResponse},  # Für interne Serverfehler
-        503: {
-            "model": ErrorResponse
-        },  # Service Unavailable (wenn Anonymizer nicht initialisiert wurde)
+        400: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
     },
 )
 async def anonymize_text_route(payload: AnonymizeInput = Body(...)):
@@ -414,46 +480,270 @@ async def anonymize_text_route(payload: AnonymizeInput = Body(...)):
             },
         )
 
-    # Optional: Mapping zurücksetzen, falls implementiert und gewünscht
-    # if payload.reset_mapping:
-    #     anonymizer_instance.reset()
-    #     logger.info("Anonymization mapping reset for this request.")
-
     try:
-        # anonymize_batch erwartet eine Liste, auch für einzelnen Text
         results = anonymizer_instance.anonymize_batch([payload.text])
-
-        # Prüfe, ob die Methode erfolgreich war (gibt Liste zurück, sonst None bei Fehlern)
         if results is None:
             logger.error(
                 "Anonymization process failed internally within the Anonymizer tool."
             )
-            # Anonymizer sollte Details geloggt haben
             return JSONResponse(
                 status_code=500,
                 content={
                     "error": "Anonymization failed during processing. Check server logs."
                 },
             )
-
-        # Extrahiere das Ergebnis für den einzelnen Text
         anonymized_text = results[0]
         logger.info("Text anonymization successful.")
-
-        # Optional: Mapping zurückgeben, falls implementiert und gewünscht
-        # current_mapping = anonymizer_instance.get_mapping() if include_mapping_flag else None
-        return AnonymizeOutput(
-            anonymized_text=anonymized_text
-        )  # , mapping=current_mapping)
+        return AnonymizeOutput(anonymized_text=anonymized_text)
 
     except Exception as e:
-        # Fange unerwartete Fehler während des Anonymisierungsaufrufs ab
         error_msg = f"An unexpected error occurred during text anonymization: {e}"
         logger.exception("Exception caught in /anonymize endpoint")
         return JSONResponse(status_code=500, content={"error": error_msg})
 
 
-# --- Ende NEUE Anonymisierungs-Route ---
+# --- Datanbase-Routes (Example for 'User' Model) ---
+
+
+@app.post(
+    "/database/users",
+    operation_id="create_user_in_db",
+    tags=["Database Tools"],
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,  # Status Code für erfolgreiches Erstellen
+    responses={
+        400: {
+            "model": ErrorResponse
+        },  # Falls z.B. E-Mail schon existiert (wird von DB-Layer behandelt)
+        500: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},  # Falls DB nicht verfügbar
+    },
+)
+async def create_user(user_data: UserCreate = Body(...)):
+    """
+    Creates a new user record in the database.
+    """
+    check_db_handler()  # Prüft, ob db_handler verfügbar ist
+    logger.info(f"Tool 'create_user_db' called via FastAPI route.")
+    try:
+        # Konvertiere Pydantic-Modell zu Dict für den Handler
+        user_dict = user_data.dict()
+        new_user = db_handler.create(UserModel, user_dict)
+        if new_user:
+            logger.info(f"User created successfully with ID: {new_user.id}")
+            # Konvertiere SQLAlchemy-Objekt zu Pydantic-Modell für die Antwort
+            return UserResponse.from_orm(new_user)
+        else:
+            # Dieser Fall sollte durch Exceptions im Handler abgedeckt sein, aber zur Sicherheit:
+            logger.error(
+                "User creation failed for unknown reasons (db_handler.create returned None)."
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create user.",
+            )
+    except Exception as e:
+        # Fange spezifische DB-Fehler ab, falls nötig (z.B. IntegrityError für unique constraints)
+        logger.exception(f"Error creating user: {e}")
+        # Hier könnte man spezifischere Fehlercodes zurückgeben, z.B. 409 Conflict bei unique constraint
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create user: {str(e)}",
+        )
+
+
+@app.get(
+    "/database/users/{user_id}",
+    operation_id="read_user_from_db",
+    tags=["Database Tools"],
+    response_model=UserResponse,
+    responses={
+        404: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def read_user(
+    user_id: int = Path(..., description="The ID of the user to retrieve."),
+):
+    """
+    Retrieves a specific user record by its ID.
+    """
+    check_db_handler()
+    logger.info(f"Tool 'read_user_db' called via FastAPI route for user ID: {user_id}")
+    try:
+        user = db_handler.read(UserModel, user_id)
+        if user:
+            logger.info(f"User found with ID: {user_id}")
+            return UserResponse.from_orm(user)
+        else:
+            logger.warning(f"User with ID {user_id} not found.")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User with ID {user_id} not found.",
+            )
+    except Exception as e:
+        logger.exception(f"Error reading user {user_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to read user: {str(e)}",
+        )
+
+
+@app.put(
+    "/database/users/{user_id}",
+    operation_id="update_user_in_db",
+    tags=["Database Tools"],
+    response_model=UserResponse,
+    responses={
+        404: {"model": ErrorResponse},
+        400: {"model": ErrorResponse},  # Für ungültige Update-Daten
+        500: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def update_user(
+    user_id: int = Path(..., description="The ID of the user to update."),
+    user_data: UserUpdate = Body(...),
+):
+    """
+    Updates an existing user record by its ID.
+    Only provided fields will be updated.
+    """
+    check_db_handler()
+    logger.info(
+        f"Tool 'update_user_db' called via FastAPI route for user ID: {user_id}"
+    )
+    # Entferne Felder, die nicht gesetzt sind (None), damit der Handler sie nicht überschreibt
+    update_data = user_data.dict(exclude_unset=True)
+
+    if not update_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No update data provided."
+        )
+
+    try:
+        updated_user = db_handler.update(UserModel, user_id, update_data)
+        if updated_user:
+            logger.info(f"User updated successfully with ID: {user_id}")
+            return UserResponse.from_orm(updated_user)
+        else:
+            # db_handler.update gibt None zurück, wenn der User nicht existiert
+            logger.warning(f"User with ID {user_id} not found for update.")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User with ID {user_id} not found.",
+            )
+    except Exception as e:
+        logger.exception(f"Error updating user {user_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update user: {str(e)}",
+        )
+
+
+@app.delete(
+    "/database/users/{user_id}",
+    operation_id="delete_user_from_db",
+    tags=["Database Tools"],
+    status_code=status.HTTP_204_NO_CONTENT,  # Kein Body bei erfolgreichem Löschen
+    responses={
+        404: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def delete_user(
+    user_id: int = Path(..., description="The ID of the user to delete."),
+):
+    """
+    Deletes a user record by its ID.
+    """
+    check_db_handler()
+    logger.info(
+        f"Tool 'delete_user_db' called via FastAPI route for user ID: {user_id}"
+    )
+    try:
+        deleted = db_handler.delete(UserModel, user_id)
+        if deleted:
+            logger.info(f"User deleted successfully with ID: {user_id}")
+            # Bei 204 No Content wird keine Antwort gesendet
+            return None  # FastAPI behandelt das korrekt
+        else:
+            logger.warning(f"User with ID {user_id} not found for deletion.")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User with ID {user_id} not found.",
+            )
+    except Exception as e:
+        logger.exception(f"Error deleting user {user_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete user: {str(e)}",
+        )
+
+
+@app.get(
+    "/database/users",
+    operation_id="query_users_db",
+    tags=["Database Tools"],
+    response_model=List[UserResponse],  # Gibt eine Liste von Usern zurück
+    responses={
+        500: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def query_users(
+    name_like: Optional[str] = Query(
+        None,
+        description="Filter users whose name contains this string (case-insensitive).",
+    ),
+    email: Optional[EmailStr] = Query(
+        None, description="Filter users by exact email address."
+    ),
+    limit: Optional[int] = Query(
+        None, description="Maximum number of users to return."
+    ),
+    offset: Optional[int] = Query(None, description="Number of users to skip."),
+    # Man könnte hier auch order_by hinzufügen, z.B. order_by: Optional[str] = Query(None, description="Field to order by (e.g., 'name' or '-id' for descending)")
+):
+    """
+    Queries user records with optional filtering, ordering, limit and offset.
+    """
+    check_db_handler()
+    logger.info(
+        f"Tool 'query_users_db' called via FastAPI route with filters: name_like={name_like}, email={email}, limit={limit}, offset={offset}"
+    )
+
+    filters = []
+    if name_like:
+        # Verwende ilike für case-insensitive Suche
+        filters.append(UserModel.name.ilike(f"%{name_like}%"))
+    if email:
+        filters.append(UserModel.email == email)
+
+    # Hier könnte man die order_by Logik hinzufügen, falls der Parameter existiert
+
+    try:
+        users = db_handler.query(
+            UserModel,
+            filters=filters if filters else None,
+            # order_by=..., # Hier order_by einfügen
+            limit=limit,
+            offset=offset,
+        )
+        logger.info(f"Query returned {len(users)} users.")
+        # Konvertiere jedes SQLAlchemy-Objekt in der Liste zu Pydantic
+        return [UserResponse.from_orm(user) for user in users]
+    except Exception as e:
+        logger.exception(f"Error querying users: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to query users: {str(e)}",
+        )
+
+
+# --- END Database-Routes ---
 
 
 # --- End API Endpoints ---
@@ -463,7 +753,7 @@ async def anonymize_text_route(payload: AnonymizeInput = Body(...)):
 mcp = FastApiMCP(
     app,
     name="Combined Tools MCP",
-    description="An API providing Python REPL, Data Visualization, DuckDuckGo Search, Email, and Text Anonymization capabilities.",  # <-- Beschreibung aktualisiert
+    description="An API providing Python REPL, Data Visualization, DuckDuckGo Search, Email, Text Anonymization, and Database capabilities.",  # <-- Beschreibung aktualisiert
     base_url=f"http://{os.environ['SERVER_HOST']}:{int(os.environ['SERVER_PORT'])}",
 )
 
