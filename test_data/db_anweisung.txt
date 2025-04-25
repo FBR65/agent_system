@@ -1,0 +1,4 @@
+1. Erstelle einen Datenbank mit dem Namen test_db.
+2. erzeuge eine Tabelle mit dem Namen User.
+3. Die Tabelle soll ID, Name, Vorname und E-mail enthalten.
+4. füge einen Datensatz hinzu: Mustermann, Erich, erich.mustermann@example.com
